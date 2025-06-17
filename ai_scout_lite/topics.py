@@ -12,7 +12,7 @@ from langchain.chains import LLMChain
 
 PROMPT_TOPIC_NAME = """
 Назови коротким заголовком (≤7 слов) научную проблему, которую решают
-следующие публикации (список заголовков через \n). Дай один заголовок.
+следующие публикации {titles} (список заголовков через \n). Дай один заголовок.
 """
 
 
@@ -20,9 +20,9 @@ PROMPT_TOPIC_NAME = """
 class Topic:
     """Описание научной темы."""
 
-    id: int
-    name: str
-    publications: List[str]
+    id: int  # порядковый номер темы
+    name: str  # краткое название
+    publications: List[str]  # исходные заголовки публикаций
 
 
 def generate_topic_name(titles: List[str]) -> str:

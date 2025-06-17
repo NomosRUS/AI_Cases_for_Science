@@ -11,7 +11,6 @@ from duckduckgo_search import DDGS
 #from langchain.llms import OpenAI
 from langchain_openai import OpenAI
 from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 import trafilatura
 
 # Включаем кэширование HTTP-запросов
@@ -71,9 +70,9 @@ def summarize_org(texts: List[str]) -> OrgInsights:
     "7M_As3Gy0vyDG4RGw4rwYI-EsqZ0Sg0X7nxtHqWgerqyB7K68A"
     )
     prompt = PromptTemplate(template=PROMPT_SUMMARY, input_variables=["text"])
-    chain = LLMChain(prompt=prompt, llm=llm)
+    chain = prompt | llm
     joined = "\n".join(texts)[:4000]  # объединяем тексты и ограничиваем длину
-    result = chain.run(text=joined)  # запрос к LLM с текстом
+    result = chain.invoke({"text": joined})  # запрос к LLM с текстом
     try:
         import json
 

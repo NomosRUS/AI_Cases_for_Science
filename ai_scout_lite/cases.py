@@ -8,7 +8,6 @@ from typing import List, Optional
 
 import pandas as pd
 from duckduckgo_search import DDGS
-from langchain.chains import LLMChain
 from langchain_openai import OpenAI
 #from langchain.llms import OpenAI
 from langchain.prompts import PromptTemplate
@@ -59,8 +58,8 @@ def analyze_url(url: str, topic_id: int, org: str) -> Optional[AICase]:
 
     llm = OpenAI(temperature=0)
     prompt = PromptTemplate(template=PROMPT_CASE_FILTER, input_variables=["text"])
-    chain = LLMChain(prompt=prompt, llm=llm)
-    result = chain.run(text=text[:4000])  # ответ от LLM
+    chain = prompt | llm
+    result = chain.invoke({"text": text[:4000]})  # ответ от LLM
 
     try:
         import json

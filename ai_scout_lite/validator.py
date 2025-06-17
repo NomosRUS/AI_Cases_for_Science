@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from langchain.chains import LLMChain
 #from langchain.llms import OpenAI
 from langchain_openai import OpenAI
 from langchain.prompts import PromptTemplate
@@ -30,8 +29,8 @@ def validate_pilot(pilot_text: str) -> ValidationResult:
     """Запрос к LLM для оценки пилотного проекта."""
     llm = OpenAI(temperature=0)
     prompt = PromptTemplate(template=PROMPT_VALIDATION, input_variables=["pilot"])
-    chain = LLMChain(prompt=prompt, llm=llm)
-    result = chain.run(pilot=pilot_text)  # ответ LLM
+    chain = prompt | llm
+    result = chain.invoke({"pilot": pilot_text})  # ответ LLM
     try:
         import json
 

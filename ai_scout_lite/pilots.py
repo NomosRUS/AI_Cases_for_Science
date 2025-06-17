@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
-from langchain.chains import LLMChain
 from langchain_openai import OpenAI
 #from langchain.llms import OpenAI
 from langchain.prompts import PromptTemplate
@@ -37,8 +36,8 @@ def generate_pilot(org: str, task: str, case_task: str, partner: str) -> PilotPr
         template=PROMPT_PILOT_GEN,
         input_variables=["org", "task", "case_task", "partner"],
     )
-    chain = LLMChain(prompt=prompt, llm=llm)
-    text = chain.run(org=org, task=task, case_task=case_task, partner=partner)
+    chain = prompt | llm
+    text = chain.invoke({"org": org, "task": task, "case_task": case_task, "partner": partner})
     lines = text.split("\n", 1)  # отделяем заголовок от тела
     title = lines[0].strip() if lines else "Пилот"
     body = lines[1].strip() if len(lines) > 1 else ""

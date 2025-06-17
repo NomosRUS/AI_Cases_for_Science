@@ -16,9 +16,9 @@ import requests_cache
 import trafilatura
 
 PROMPT_CASE_FILTER = """
-Определи, описывает ли текст веб-страницы успешный кейс применения
+Определи, описывает ли текст веб-страницы {text} успешный кейс применения
 искусственного интеллекта в научных исследованиях.
-Ответ JSON: {{ "is_ai_case":bool, "task":"", "ai_method":"", "kpi":"" }}
+Ответ JSON: {{ "is_ai_case": bool, "task": "", "ai_method": "", "kpi": "" }}
 """
 
 requests_cache.install_cache("ai_scout_cache")
@@ -38,12 +38,12 @@ def search_duckduckgo(query: str, max_results: int = 10) -> List[str]:
 class AICase:
     """Структура для данных по AI-кейсу."""
 
-    topic_id: int
-    task: str
-    org: str
-    ai_method: str
-    kpi: str
-    url: str
+    topic_id: int  # индекс соответствующей научной задачи
+    task: str  # формулировка задачи
+    org: str  # название организации
+    ai_method: str  # применённый метод ИИ
+    kpi: str  # показатель эффективности
+    url: str  # ссылка на источник
 
 
 def analyze_url(url: str, topic_id: int, org: str) -> Optional[AICase]:
@@ -60,7 +60,7 @@ def analyze_url(url: str, topic_id: int, org: str) -> Optional[AICase]:
     llm = OpenAI(temperature=0)
     prompt = PromptTemplate(template=PROMPT_CASE_FILTER, input_variables=["text"])
     chain = LLMChain(prompt=prompt, llm=llm)
-    result = chain.run(text=text[:4000])
+    result = chain.run(text=text[:4000])  # ответ от LLM
 
     try:
         import json
@@ -84,7 +84,7 @@ def gather_ai_cases(org: str, tasks: List[str], max_results: int = 5) -> pd.Data
     """Ищем AI-кейсы, относящиеся к задачам."""
     cases: List[AICase] = []
     for i, task in enumerate(tasks):
-        query = f"{org} {task} AI case study"
+        query = f"{org} {task} AI case study"  # поисковый запрос
         for url in search_duckduckgo(query, max_results=max_results):
             case = analyze_url(url, topic_id=i, org=org)
             if case:

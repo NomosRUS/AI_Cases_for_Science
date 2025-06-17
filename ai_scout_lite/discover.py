@@ -19,9 +19,9 @@ requests_cache.install_cache("ai_scout_cache")
 
 # Константы с промптами
 PROMPT_SUMMARY = """
-Ты аналитик научной деятельности. На основе собранной информации, текста выдели 5-7 научных достижений организации и
+Ты аналитик научной деятельности. На основе собранной информации {text} выдели 5-7 научных достижений организации и
 сформулируй 5 основных научных задач, которыми она занимается. Ответ JSON:
-{{ "achievements":[...], "tasks":[...] }}
+{{ "achievements": [...], "tasks": [...] }}
 """
 
 
@@ -60,8 +60,8 @@ def collect_org_texts(org: str, max_pages: int = 5) -> List[str]:
 class OrgInsights:
     """Сводная информация об организации."""
 
-    achievements: List[str]
-    tasks: List[str]
+    achievements: List[str]  # ключевые достижения организации
+    tasks: List[str]  # основные научные задачи
 
 
 def summarize_org(texts: List[str]) -> OrgInsights:
@@ -72,8 +72,8 @@ def summarize_org(texts: List[str]) -> OrgInsights:
     )
     prompt = PromptTemplate(template=PROMPT_SUMMARY, input_variables=["text"])
     chain = LLMChain(prompt=prompt, llm=llm)
-    joined = "\n".join(texts)[:4000]
-    result = chain.run(text=joined)
+    joined = "\n".join(texts)[:4000]  # объединяем тексты и ограничиваем длину
+    result = chain.run(text=joined)  # запрос к LLM с текстом
     try:
         import json
 

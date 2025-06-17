@@ -10,11 +10,11 @@ from langchain_openai import OpenAI
 from langchain.prompts import PromptTemplate
 
 PROMPT_VALIDATION = """
-Оцени, удовлетворяет ли пилотный проект критериям:
+Оцени, удовлетворяет ли пилотный проект {pilot} критериям:
 1) повышает эффективность научной работы организации,
 2) решает актуальную научную задачу,
 3) релевантен интересам указанных партнёров.
-Ответ JSON {{ "acceptable":bool, "reason":"" }}.
+Ответ JSON {{ "acceptable": bool, "reason": "" }}.
 """
 
 
@@ -22,8 +22,8 @@ PROMPT_VALIDATION = """
 class ValidationResult:
     """Результат проверки."""
 
-    acceptable: bool
-    reason: str
+    acceptable: bool  # прошёл ли пилот проверку
+    reason: str  # аргументация решения
 
 
 def validate_pilot(pilot_text: str) -> ValidationResult:
@@ -31,7 +31,7 @@ def validate_pilot(pilot_text: str) -> ValidationResult:
     llm = OpenAI(temperature=0)
     prompt = PromptTemplate(template=PROMPT_VALIDATION, input_variables=["pilot"])
     chain = LLMChain(prompt=prompt, llm=llm)
-    result = chain.run(pilot=pilot_text)
+    result = chain.run(pilot=pilot_text)  # ответ LLM
     try:
         import json
 

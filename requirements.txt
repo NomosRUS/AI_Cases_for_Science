@@ -10,3 +10,4 @@ pandas
 tqdm
 rich
 requests_cache
+langchain-openai

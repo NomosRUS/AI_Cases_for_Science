@@ -8,7 +8,8 @@ from typing import List
 
 import requests_cache
 from duckduckgo_search import DDGS
-from langchain.llms import OpenAI
+#from langchain.llms import OpenAI
+from langchain_openai import OpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import trafilatura
@@ -18,8 +19,9 @@ requests_cache.install_cache("ai_scout_cache")
 
 # Константы с промптами
 PROMPT_SUMMARY = """
-Ты аналитик научной деятельности. На основе собранной информации, текста выдели 5-7 научных достижений организации и сформулируй 5 основных научных задач, которыми она занимается. Ответ JSON:
-{ "achievements":[...], "tasks":[...] }
+Ты аналитик научной деятельности. На основе собранной информации, текста выдели 5-7 научных достижений организации и
+сформулируй 5 основных научных задач, которыми она занимается. Ответ JSON:
+{{ "achievements":[...], "tasks":[...] }}
 """
 
 
@@ -64,7 +66,10 @@ class OrgInsights:
 
 def summarize_org(texts: List[str]) -> OrgInsights:
     """Получаем список достижений и задач с помощью LLM."""
-    llm = OpenAI(temperature=0)
+    llm = OpenAI(temperature=0, openai_api_key=
+    "sk-proj-dphTObv3lmCT1loQNX8T9pj0vS_KKgSq46D-1fbc0QTJkZ5yIFy_CIgkzq0umYRkLE92wQc7a4T3BlbkFJydrUMqoUe8sDfUhHv4lrEn9e"
+    "7M_As3Gy0vyDG4RGw4rwYI-EsqZ0Sg0X7nxtHqWgerqyB7K68A"
+    )
     prompt = PromptTemplate(template=PROMPT_SUMMARY, input_variables=["text"])
     chain = LLMChain(prompt=prompt, llm=llm)
     joined = "\n".join(texts)[:4000]

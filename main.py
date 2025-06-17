@@ -35,7 +35,8 @@ def save_org_insights(org: str, output_dir: Path) -> discover.OrgInsights:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="AI-Scout-Lite")
-    parser.add_argument("org_name", help="Название организации")
+    #parser.add_argument("org_name", help="Название организации")
+    parser.add_argument("org_name", help="Название организации", nargs="?", default="Сколтех")
     args = parser.parse_args()
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)

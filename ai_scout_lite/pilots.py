@@ -6,14 +6,15 @@ from dataclasses import dataclass
 from typing import List
 
 from langchain.chains import LLMChain
-from langchain.llms import OpenAI
+from langchain_openai import OpenAI
+#from langchain.llms import OpenAI
 from langchain.prompts import PromptTemplate
 
 PROMPT_PILOT_GEN = """
 Составь черновик пилотного проекта внедрения ИИ для организации «{org}».
-Используй проблему: {task}; релевантный AI-кейс: {case_task};
-индустриальный партнёр: {partner}. Формат:
- {title}
+Используй проблему: {{task}}; релевантный AI-кейс: {{case_task}};
+индустриальный партнёр: {{partner}}. Формат:
+ {{title}}
  • Problem: ...
  • AI Solution: ...
  • Partner: ...

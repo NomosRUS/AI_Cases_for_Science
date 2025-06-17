@@ -9,7 +9,8 @@ from typing import List, Optional
 import pandas as pd
 from duckduckgo_search import DDGS
 from langchain.chains import LLMChain
-from langchain.llms import OpenAI
+from langchain_openai import OpenAI
+#from langchain.llms import OpenAI
 from langchain.prompts import PromptTemplate
 import requests_cache
 import trafilatura
@@ -17,7 +18,7 @@ import trafilatura
 PROMPT_CASE_FILTER = """
 Определи, описывает ли текст веб-страницы успешный кейс применения
 искусственного интеллекта в научных исследованиях.
-Ответ JSON: { "is_ai_case":bool, "task":"", "ai_method":"", "kpi":"" }
+Ответ JSON: {{ "is_ai_case":bool, "task":"", "ai_method":"", "kpi":"" }}
 """
 
 requests_cache.install_cache("ai_scout_cache")

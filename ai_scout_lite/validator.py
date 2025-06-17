@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from langchain.chains import LLMChain
-from langchain.llms import OpenAI
+#from langchain.llms import OpenAI
+from langchain_openai import OpenAI
 from langchain.prompts import PromptTemplate
 
 PROMPT_VALIDATION = """
@@ -13,7 +14,7 @@ PROMPT_VALIDATION = """
 1) повышает эффективность научной работы организации,
 2) решает актуальную научную задачу,
 3) релевантен интересам указанных партнёров.
-Ответ JSON { "acceptable":bool, "reason":"" }.
+Ответ JSON {{ "acceptable":bool, "reason":"" }}.
 """
 
 

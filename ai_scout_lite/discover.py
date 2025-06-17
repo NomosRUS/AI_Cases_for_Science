@@ -6,9 +6,12 @@ import logging
 from dataclasses import dataclass
 from typing import List
 
+from .utils import extract_json
+
 import requests_cache
 from duckduckgo_search import DDGS
-#from langchain.llms import OpenAI
+
+# from langchain.llms import OpenAI
 from langchain_openai import OpenAI
 from langchain.prompts import PromptTemplate
 import trafilatura
@@ -65,20 +68,19 @@ class OrgInsights:
 
 def summarize_org(texts: List[str]) -> OrgInsights:
     """Получаем список достижений и задач с помощью LLM."""
-    llm = OpenAI(temperature=0, openai_api_key=
-    "sk-proj-dphTObv3lmCT1loQNX8T9pj0vS_KKgSq46D-1fbc0QTJkZ5yIFy_CIgkzq0umYRkLE92wQc7a4T3BlbkFJydrUMqoUe8sDfUhHv4lrEn9e"
-    "7M_As3Gy0vyDG4RGw4rwYI-EsqZ0Sg0X7nxtHqWgerqyB7K68A"
+    llm = OpenAI(
+        temperature=0,
+        openai_api_key="sk-proj-dphTObv3lmCT1loQNX8T9pj0vS_KKgSq46D-1fbc0QTJkZ5yIFy_CIgkzq0umYRkLE92wQc7a4T3BlbkFJydrUMqoUe8sDfUhHv4lrEn9e"
+        "7M_As3Gy0vyDG4RGw4rwYI-EsqZ0Sg0X7nxtHqWgerqyB7K68A",
     )
     prompt = PromptTemplate(template=PROMPT_SUMMARY, input_variables=["text"])
     chain = prompt | llm
     joined = "\n".join(texts)[:4000]  # объединяем тексты и ограничиваем длину
     result = chain.invoke({"text": joined})  # запрос к LLM с текстом
-    try:
-        import json
-
-        data = json.loads(result)
-        return OrgInsights(achievements=data.get("achievements", []), tasks=data.get("tasks", []))
-    except Exception as exc:  # noqa: BLE001
-        logging.error("LLM parsing failed: %s", exc)
+    data = extract_json(result)
+    if data:
+        return OrgInsights(
+            achievements=data.get("achievements", []),
+            tasks=data.get("tasks", []),
+        )
     return OrgInsights([], [])
-

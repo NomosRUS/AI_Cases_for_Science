@@ -7,4 +7,5 @@ __all__ = [
     "partners",
     "pilots",
     "validator",
+    "utils",
 ]

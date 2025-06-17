@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 
-#from langchain.llms import OpenAI
+# from langchain.llms import OpenAI
 from langchain_openai import OpenAI
 from langchain.prompts import PromptTemplate
+
+from .utils import extract_json
 
 PROMPT_VALIDATION = """
 Оцени, удовлетворяет ли пилотный проект {pilot} критериям:
@@ -31,14 +34,11 @@ def validate_pilot(pilot_text: str) -> ValidationResult:
     prompt = PromptTemplate(template=PROMPT_VALIDATION, input_variables=["pilot"])
     chain = prompt | llm
     result = chain.invoke({"pilot": pilot_text})  # ответ LLM
-    try:
-        import json
-
-        data = json.loads(result)
+    data = extract_json(result)
+    if data:
         return ValidationResult(
             acceptable=bool(data.get("acceptable")),
             reason=data.get("reason", ""),
         )
-    except Exception:  # noqa: BLE001
-        return ValidationResult(False, "parse error")
-
+    logging.warning("Failed to parse validation result")
+    return ValidationResult(False, "parse error")

@@ -6,10 +6,13 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
+from .utils import extract_json
+
 import pandas as pd
 from duckduckgo_search import DDGS
 from langchain_openai import OpenAI
-#from langchain.llms import OpenAI
+
+# from langchain.llms import OpenAI
 from langchain.prompts import PromptTemplate
 import requests_cache
 import trafilatura
@@ -61,11 +64,9 @@ def analyze_url(url: str, topic_id: int, org: str) -> Optional[AICase]:
     chain = prompt | llm
     result = chain.invoke({"text": text[:4000]})  # ответ от LLM
 
-    try:
-        import json
-
-        data = json.loads(result)
-        if data.get("is_ai_case"):
+    data = extract_json(result)
+    if data.get("is_ai_case"):
+        try:
             return AICase(
                 topic_id=topic_id,
                 task=data.get("task", ""),
@@ -74,8 +75,8 @@ def analyze_url(url: str, topic_id: int, org: str) -> Optional[AICase]:
                 kpi=data.get("kpi", ""),
                 url=url,
             )
-    except Exception as exc:  # noqa: BLE001
-        logging.error("Failed to parse LLM result for %s: %s", url, exc)
+        except Exception as exc:  # noqa: BLE001
+            logging.error("Failed to build AICase for %s: %s", url, exc)
     return None
 
 
@@ -89,4 +90,3 @@ def gather_ai_cases(org: str, tasks: List[str], max_results: int = 5) -> pd.Data
             if case:
                 cases.append(case)
     return pd.DataFrame([c.__dict__ for c in cases])
-

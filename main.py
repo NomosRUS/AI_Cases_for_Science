@@ -1,36 +1,15 @@
 """CLI вход в AI-Scout-Lite."""
 
 from __future__ import annotations
-
+from ai_scout_lite.discover import save_org_insights
 import argparse
 import os
 from pathlib import Path
-try:
-    from rich.console import Console
-except ImportError:
-    class Console:
-        def print(self, *args, **kwargs):
-            print(*args)
 
 from ai_scout_lite import discover, cases, partners, pilots, validator
 
-console = Console()
 
 
-def save_org_insights(org: str, output_dir: Path) -> discover.OrgInsights:
-    """Собираем и сохраняем информацию об организации."""
-    console.print(f"[bold]Собираем тексты об {org}...")
-    texts = discover.collect_org_texts(org)
-    insights = discover.summarize_org(texts)
-    md_path = output_dir / "org_insights.md"
-    with md_path.open("w", encoding="utf-8") as f:
-        f.write("# Достижения\n")
-        for ach in insights.achievements:
-            f.write(f"- {ach}\n")
-        f.write("\n# Задачи\n")
-        for task in insights.tasks:
-            f.write(f"- {task}\n")
-    return insights
 
 
 def main() -> None:

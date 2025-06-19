@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+try:
+    from rich.console import Console
+except ImportError:
+    class Console:
+        def print(self, *args, **kwargs):
+            print(*args)
+
+
 import logging
 from dataclasses import dataclass
 from typing import List
@@ -25,6 +33,23 @@ PROMPT_SUMMARY = """
 сформулируй 5 основных научных задач, которыми она занимается. Ответ JSON:
 {{ "achievements": [...], "tasks": [...] }}
 """
+console = Console()
+
+def save_org_insights(org: str, output_dir: Path) -> discover.OrgInsights:
+    """Собираем и сохраняем информацию об организации."""
+    console.print(f"[bold]Собираем тексты об {org}...")
+    texts = collect_org_texts(org)
+    insights = summarize_org(texts)
+    md_path = output_dir / "org_insights.md"
+    with md_path.open("w", encoding="utf-8") as f:
+        f.write("# Достижения\n")
+        for ach in insights.achievements:
+            f.write(f"- {ach}\n")
+        f.write("\n# Задачи\n")
+        for task in insights.tasks:
+            f.write(f"- {task}\n")
+    return insights
+
 
 
 def search_duckduckgo(query: str, max_results: int = 10) -> List[str]:

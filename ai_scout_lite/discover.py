@@ -70,8 +70,7 @@ def summarize_org(texts: List[str]) -> OrgInsights:
     """Получаем список достижений и задач с помощью LLM."""
     llm = OpenAI(
         temperature=0,
-        openai_api_key="sk-proj-dphTObv3lmCT1loQNX8T9pj0vS_KKgSq46D-1fbc0QTJkZ5yIFy_CIgkzq0umYRkLE92wQc7a4T3BlbkFJydrUMqoUe8sDfUhHv4lrEn9e"
-        "7M_As3Gy0vyDG4RGw4rwYI-EsqZ0Sg0X7nxtHqWgerqyB7K68A",
+        openai_api_key="...",
     )
     prompt = PromptTemplate(template=PROMPT_SUMMARY, input_variables=["text"])
     chain = prompt | llm

@@ -1,7 +1,7 @@
 """CLI вход в AI-Scout-Lite."""
 
 from __future__ import annotations
-from ai_scout_lite.discover import save_org_insights
+from ai_scout_lite.discover import discover_org
 import argparse
 import os
 from pathlib import Path
@@ -20,7 +20,7 @@ def main() -> None:
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)
 
-    insights = save_org_insights(args.org_name, output_dir)
+    discover_org(args.org_name, output_dir)
 
     # console.print("[bold]Ищем AI-кейсы...")
     # cases_df = cases.gather_ai_cases(args.org_name, insights.tasks)

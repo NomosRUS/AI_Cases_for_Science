@@ -1,69 +1,85 @@
-"""Модуль для веб-поиска и сбора текстов об организации."""
+"""Utilities for discovering information about an organisation.
+
+The module performs five operations:
+1. Find the official web site of an organisation by name.
+2. Extract key facts from the official web site: activities, 2022-2025 results,
+   research directions and partners.
+3. Search the internet and collect the same information from public sources.
+4. Store data from steps 2 and 3 in separate JSON files.
+5. Save human readable summaries from steps 2 and 3 in two txt files.
+"""
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+import urllib.parse
+from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import List
+
 try:
     from rich.console import Console
-except ImportError:
+except Exception:  # pragma: no cover - rich is optional
     class Console:
-        def print(self, *args, **kwargs):
+        def print(self, *args, **kwargs):  # type: ignore[no-redef]
             print(*args)
 
-
-import logging
-from dataclasses import dataclass
-from typing import List
+from duckduckgo_search import DDGS
+from langchain_openai import OpenAI
+from langchain.prompts import PromptTemplate
+import requests_cache
+import trafilatura
 
 from .utils import extract_json
 
-import requests_cache
-from duckduckgo_search import DDGS
-
-# from langchain.llms import OpenAI
-from langchain_openai import OpenAI
-from langchain.prompts import PromptTemplate
-import trafilatura
-
-# Включаем кэширование HTTP-запросов
+# cache web requests to speed up repeated runs
 requests_cache.install_cache("ai_scout_cache")
 
-# Константы с промптами
-PROMPT_SUMMARY = """
-Ты аналитик научной деятельности. На основе собранной информации {text} выдели 5-7 научных достижений организации и
-сформулируй 5 основных научных задач, которыми она занимается. Ответ JSON:
-{{ "achievements": [...], "tasks": [...] }}
-"""
 console = Console()
 
-def save_org_insights(org: str, output_dir: Path) -> discover.OrgInsights:
-    """Собираем и сохраняем информацию об организации."""
-    console.print(f"[bold]Собираем тексты об {org}...")
-    texts = collect_org_texts(org)
-    insights = summarize_org(texts)
-    md_path = output_dir / "org_insights.md"
-    with md_path.open("w", encoding="utf-8") as f:
-        f.write("# Достижения\n")
-        for ach in insights.achievements:
-            f.write(f"- {ach}\n")
-        f.write("\n# Задачи\n")
-        for task in insights.tasks:
-            f.write(f"- {task}\n")
-    return insights
+
+@dataclass
+class OrgInfo:
+    """Structured information about an organisation."""
+
+    activities: List[str]
+    results: List[str]
+    research: List[str]
+    partners: List[str]
 
 
+PROMPT_INFO = """
+Ты ассоциируешься с научной аналитикой. Проанализируй текст {text} и
+выдели:
+1. основные направления деятельности организации,
+2. основные результаты за 2022-2025 годы,
+3. основные научные направления организации,
+4. ключевых партнёров организации.
+Ответ JSON:
+{"activities": [...], "results": [...], "research": [...], "partners": [...]}
+"""
+
+
+# ---------------------------------------------------------------------------
+# generic helpers
+# ---------------------------------------------------------------------------
 
 def search_duckduckgo(query: str, max_results: int = 10) -> List[str]:
-    """Ищем ссылки через DuckDuckGo. TODO: заменить на Perplexity API."""
-    results: List[str] = []
+    """Return a list of links for the query from DuckDuckGo."""
+
+    links: List[str] = []
     with DDGS() as ddgs:
         for r in ddgs.text(query, max_results=max_results):
             if r.get("href"):
-                results.append(r["href"])
-    return results
+                links.append(r["href"])
+    return links
 
 
 def fetch_text(url: str) -> str:
-    """Скачиваем и очищаем текст страницы."""
+    """Download and clean page text."""
+
     try:
         downloaded = trafilatura.fetch_url(url)
         if downloaded:
@@ -73,38 +89,108 @@ def fetch_text(url: str) -> str:
     return ""
 
 
-def collect_org_texts(org: str, max_pages: int = 5) -> List[str]:
-    """Собираем тексты с сайта организации."""
-    texts: List[str] = []
-    for url in search_duckduckgo(f"{org} science news", max_results=max_pages):
-        text = fetch_text(url)
-        if text:
-            texts.append(text)
-    return texts
+# ---------------------------------------------------------------------------
+# information extraction
+# ---------------------------------------------------------------------------
 
+def _extract_info(text: str) -> OrgInfo:
+    """Use LLM to extract structured info from raw text."""
 
-@dataclass
-class OrgInsights:
-    """Сводная информация об организации."""
-
-    achievements: List[str]  # ключевые достижения организации
-    tasks: List[str]  # основные научные задачи
-
-
-def summarize_org(texts: List[str]) -> OrgInsights:
-    """Получаем список достижений и задач с помощью LLM."""
-    llm = OpenAI(
-        temperature=0,
-        openai_api_key="OPENAI_API_KEY",
-    )
-    prompt = PromptTemplate(template=PROMPT_SUMMARY, input_variables=["text"])
+    llm = OpenAI(temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY", "OPENAI_API_KEY"))
+    prompt = PromptTemplate(template=PROMPT_INFO, input_variables=["text"])
     chain = prompt | llm
-    joined = "\n".join(texts)[:4000]  # объединяем тексты и ограничиваем длину
-    result = chain.invoke({"text": joined})  # запрос к LLM с текстом
+    result = chain.invoke({"text": text[:4000]})
     data = extract_json(result)
-    if data:
-        return OrgInsights(
-            achievements=data.get("achievements", []),
-            tasks=data.get("tasks", []),
-        )
-    return OrgInsights([], [])
+    return OrgInfo(
+        activities=data.get("activities", []),
+        results=data.get("results", []),
+        research=data.get("research", []),
+        partners=data.get("partners", []),
+    )
+
+
+# ---------------------------------------------------------------------------
+# official web site
+# ---------------------------------------------------------------------------
+
+def find_official_site(org: str) -> str:
+    """Try to find the official site of the organisation."""
+
+    for url in search_duckduckgo(f"{org} официальный сайт", max_results=5):
+        domain = urllib.parse.urlparse(url).netloc.lower()
+        if org.split()[0].lower() in domain:
+            return url
+    return ""
+
+
+def extract_official_info(org: str) -> OrgInfo:
+    """Collect information from the organisation's official site."""
+
+    url = find_official_site(org)
+    if not url:
+        logging.warning("Official site for %s not found", org)
+        return OrgInfo([], [], [], [])
+
+    console.print(f"[bold]Читаем официальный сайт {url}")
+    text = fetch_text(url)
+    return _extract_info(text)
+
+
+# ---------------------------------------------------------------------------
+# internet search
+# ---------------------------------------------------------------------------
+
+def gather_internet_info(org: str, max_results: int = 5) -> OrgInfo:
+    """Search the web for public information about the organisation."""
+
+    texts: List[str] = []
+    query = f"{org} результаты 2022 2025"
+    for url in search_duckduckgo(query, max_results=max_results):
+        txt = fetch_text(url)
+        if txt:
+            texts.append(txt)
+    return _extract_info("\n".join(texts))
+
+
+# ---------------------------------------------------------------------------
+# saving helpers
+# ---------------------------------------------------------------------------
+
+def save_json(info: OrgInfo, path: Path) -> None:
+    path.write_text(json.dumps(asdict(info), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def info_as_text(info: OrgInfo) -> str:
+    lines = ["# Основные направления деятельности:"]
+    lines += [f"- {a}" for a in info.activities]
+    lines.append("\n# Основные результаты 2022-2025:")
+    lines += [f"- {r}" for r in info.results]
+    lines.append("\n# Научные направления:")
+    lines += [f"- {s}" for s in info.research]
+    lines.append("\n# Партнёры:")
+    lines += [f"- {p}" for p in info.partners]
+    return "\n".join(lines)
+
+
+def save_txt(info: OrgInfo, path: Path) -> None:
+    path.write_text(info_as_text(info), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# public API
+# ---------------------------------------------------------------------------
+
+def discover_org(org: str, output_dir: Path) -> None:
+    """Run discovery pipeline for the organisation."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    site_info = extract_official_info(org)
+    web_info = gather_internet_info(org)
+
+    save_json(site_info, output_dir / "site_info.json")
+    save_json(web_info, output_dir / "internet_info.json")
+
+    save_txt(site_info, output_dir / "site_info.txt")
+    save_txt(web_info, output_dir / "internet_info.txt")
+

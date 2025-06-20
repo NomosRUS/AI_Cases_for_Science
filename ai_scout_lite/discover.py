@@ -39,7 +39,7 @@ import json
 import logging
 import os
 import urllib.parse
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 import re, urllib.parse, tldextract, requests
@@ -92,21 +92,24 @@ _BASE_SLEEP  = 2          # базовая задержка (сек)
 class OrgInfo:
     """Structured information about an organisation."""
 
-    activities: List[str]
-    results: List[str]
-    research: List[str]
-    partners: List[str]
+    science:     List[str] = field(default_factory=list)    # новые поля
+    activities:  List[str] = field(default_factory=list)
+    results:     List[str] = field(default_factory=list)
+    commercial:  List[str] = field(default_factory=list)    # NEW
+    partners:    List[str] = field(default_factory=list)
 
 
 PROMPT_INFO = """
-Ты ассоциируешься с научной аналитикой. Проанализируй текст {text} и
+Ты эксперт по научной аналитике и изучению успехов научных организаций. Проанализируй текст {text} и
 выдели:
-1. основные направления деятельности организации,
-2. основные результаты за 2022-2025 годы,
-3. основные научные направления организации,
-4. ключевых партнёров организации.
+1. решаемые организацией научные проблемы (с примерами если есть), 
+2. другие направления деятельности организации (например, в производственной или коммерческой сфере),
+3. основные научные результаты за 2024-2025 годы (не только в показателях, но и как решенные научные задачи),
+4. опыт коммерциализации научных результатов (с какими организациями и что именно приносит прибыль),
+5. ключевые индустриальные партнёры организации из различных отраслей (с указаниаем конкретных организаций).
 Верни **строго JSON**:
-{{"activities": [...], "results": [...], "research": [...], "partners": [...]}}
+{{"science": [...], "activities": [...], "results": [...], "commercial": [...], "partners": [...]}}
+Пиши подробно, но только на основе предоставленной информации.
 """
 
 
@@ -115,7 +118,7 @@ PROMPT_INFO = """
 # ---------------------------------------------------------------------------
 
 
-def search_duckduckgo(query: str, max_results: int = 2) -> List[str]:
+def search_duckduckgo(query: str, max_results: int = 10) -> List[str]:
     """DuckDuckGo search with Firefox UA, back-off and verbose logging."""
     console.print(f"[cyan]→ DuckDuckGo query:[/] {query}")
 
@@ -232,18 +235,19 @@ def _extract_info(text: str, model: str = "gpt-4o-mini") -> OrgInfo:
 
     # 2. Готовим чат-шаблон
     prompt = ChatPromptTemplate.from_template(PROMPT_INFO)
-    print(prompt.format(text="demo"))
+    print(prompt.format(text="org"))
 
     # 3. Запускаем цепочку (Prompt → ChatOpenAI)
     chain = prompt | llm
-    result = chain.invoke({"text": text[:10000]})  # ≤4 000 символов для экономии
+    result = chain.invoke({"text": text[:100000]})  # ≤4 000 символов для экономии
 
     # 4. JSON-парсинг + формирование dataclass
     data = extract_json(result)
     return OrgInfo(
+        science=data.get("science", []),
         activities=data.get("activities", []),
         results=data.get("results", []),
-        research=data.get("research", []),
+        commercial=data.get("commercial", []),
         partners=data.get("partners", []),
     )
 
@@ -416,12 +420,12 @@ def extract_official_info(org: str, out_dir: Path) -> OrgInfo:
 # internet search
 # ---------------------------------------------------------------------------
 
-def gather_internet_info(org: str, max_results: int = 5) -> OrgInfo:
+def gather_internet_info(org: str, max_results: int = 10) -> OrgInfo:
     """Search the web for public information about the organisation."""
     console.print("Читаем иные открытые источники")
 
     texts: List[str] = []
-    query = f"{org} результаты 2022 2025"
+    query = f"{org} результаты партнеры исследования"
     for url in search_duckduckgo(query, max_results=max_results):
         txt = fetch_text(url)
         if txt:
@@ -438,14 +442,21 @@ def save_json(info: OrgInfo, path: Path) -> None:
     console.print("сохранили файл")
 
 def info_as_text(info: OrgInfo) -> str:
-    lines = ["# Основные направления деятельности:"]
+    lines = ["# Научные проблемы (science):"]
+    lines += [f"- {s}" for s in info.science]
+
+    lines.append("\n# Другие направления деятельности:")
     lines += [f"- {a}" for a in info.activities]
-    lines.append("\n# Основные результаты 2022-2025:")
+
+    lines.append("\n# Основные результаты 2024-2025:")
     lines += [f"- {r}" for r in info.results]
-    lines.append("\n# Научные направления:")
-    lines += [f"- {s}" for s in info.research]
-    lines.append("\n# Партнёры:")
+
+    lines.append("\n# Коммерциализация научных результатов:")
+    lines += [f"- {c}" for c in info.commercial]
+
+    lines.append("\n# Индустриальные партнёры:")
     lines += [f"- {p}" for p in info.partners]
+
     return "\n".join(lines)
 
 
@@ -518,7 +529,7 @@ def _diagnostic_download(url: str) -> str:
         console.print(f"[red]Readability failed:[/] {err}")
         return ""
 
-def crawl_one_level(start_url: str, max_pages: int = 10, min_len: int = 400) -> str:
+def crawl_one_level(start_url: str, max_pages: int = 7, min_len: int = 400) -> str:
     """
     Скачивает главную страницу + все ссылки 1-го уровня внутри того же домена.
     Возвращает объединённый «чистый» текст (или '' если ничего нет).

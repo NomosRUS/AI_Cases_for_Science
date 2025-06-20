@@ -2,9 +2,8 @@
 """Utility helpers for AI-Scout-Lite."""
 from __future__ import annotations
 
-import json
-import logging
-import re
+
+import json, json5, logging, re
 from typing import Any, Dict
 
 def _to_text(obj: Any) -> str:
@@ -20,20 +19,34 @@ def _to_text(obj: Any) -> str:
         return obj.decode("utf-8", errors="ignore")
     return str(obj)
 
-def extract_json(text_or_msg: Any) -> Dict[str, Any]:
-    """Извлекает **первый** JSON-объект из текста или LangChain-сообщения.
+# ai_scout_lite/utils.py
+import json, json5, logging, re
 
-    Возвращает пустой dict, если блок не найден или парсинг не удался.
+def extract_json(msg) -> dict:
     """
-    raw_text = _to_text(text_or_msg)
+    Достаёт 1-й JSON-блок из строки/AIMessage.
+    • терпит ```json … ``` и trailing comma
+    • возвращает {} при любой ошибке
+    """
+    # 0. превратим AIMessage → str
+    if hasattr(msg, "content"):
+        msg = msg.content
 
-    match = re.search(r"\{.*?\}", raw_text, flags=re.DOTALL)
+    # 1. уберём ```json … ``` / ``` … ```
+    msg = re.sub(r"```(?:json)?|```", "", msg, flags=re.I).strip()
+
+    # 2. берём ДЛИННЕЙШИЙ блок {...}
+    match = max(re.findall(r"\{.*?\}", msg, re.S), key=len, default="")
     if not match:
-        logging.warning("No JSON object found in text")
+        logging.warning("extract_json: no JSON found")
         return {}
 
-    try:
-        return json.loads(match.group(0))
-    except Exception as exc:           # noqa: BLE001
-        logging.warning("Failed to parse JSON: %s", exc)
-        return {}
+    # 3. сначала обычный json, потом json5
+    for parser in (json.loads, json5.loads):
+        try:
+            return parser(match)
+        except Exception:
+            continue
+
+    logging.warning("extract_json: cannot parse JSON after json5 fallback")
+    return {}

@@ -13,7 +13,8 @@ The module performs five operations:
 
 from __future__ import annotations
 import itertools
-
+import textwrap
+from collections import OrderedDict
 
 from rich import box, table
 from readability import Document
@@ -32,7 +33,7 @@ from urllib.parse import quote_plus
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
-
+from openai import OpenAI
 
 from fake_useragent import UserAgent
 import json
@@ -101,7 +102,7 @@ class OrgInfo:
 
 PROMPT_INFO = """
 Ты эксперт по научной аналитике и изучению успехов научных организаций. Проанализируй текст {text} и
-выдели:
+выдели (подробно, но только на основе предоставленной информации):
 1. решаемые организацией научные проблемы (с примерами если есть), 
 2. другие направления деятельности организации (например, в производственной или коммерческой сфере),
 3. основные научные результаты за 2024-2025 годы (не только в показателях, но и как решенные научные задачи),
@@ -109,10 +110,23 @@ PROMPT_INFO = """
 5. ключевые индустриальные партнёры организации из различных отраслей (с указаниаем конкретных организаций).
 Верни **строго JSON**:
 {{"science": [...], "activities": [...], "results": [...], "commercial": [...], "partners": [...]}}
-Пиши подробно, но только на основе предоставленной информации.
 """
 
-
+ORG_INFO_SCHEMA = {
+    "name": "extract_org_info",
+    "description": "Return structured info about a research institute.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "science":    {"type": "array", "items": {"type": "string"}},
+            "activities": {"type": "array", "items": {"type": "string"}},
+            "results":    {"type": "array", "items": {"type": "string"}},
+            "commercial": {"type": "array", "items": {"type": "string"}},
+            "partners":   {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["science", "activities", "results", "partners"]
+    }
+}
 # ---------------------------------------------------------------------------
 # generic helpers
 # ---------------------------------------------------------------------------
@@ -213,43 +227,8 @@ def fetch_text(url: str) -> str:
 # information extraction
 # ---------------------------------------------------------------------------
 
-def _extract_info(text: str, model: str = "gpt-4o-mini") -> OrgInfo:
-    """
-    Извлекает структурированную информацию о научной организации с помощью LLM.
 
-    Args:
-        text: сырой объединённый текст (About, новости, публикации).
-        model: имя модели OpenAI Chat-Completion API (по умолчанию gpt-4o-mini).
 
-    Returns:
-        OrgInfo dataclass с четырьмя списками строк.
-    """
-    console.print("[bold cyan]⏳  Извлекаем ключевую информацию из текста…")
-
-    # 1. Создаём чат-LLM
-    llm = ChatOpenAI(
-        model=model,
-        temperature=0,
-        openai_api_key=os.getenv("OPENAI_API_KEY"),  # без дефолта-плацебо!
-    )
-
-    # 2. Готовим чат-шаблон
-    prompt = ChatPromptTemplate.from_template(PROMPT_INFO)
-    print(prompt.format(text="org"))
-
-    # 3. Запускаем цепочку (Prompt → ChatOpenAI)
-    chain = prompt | llm
-    result = chain.invoke({"text": text[:100000]})  # ≤4 000 символов для экономии
-
-    # 4. JSON-парсинг + формирование dataclass
-    data = extract_json(result)
-    return OrgInfo(
-        science=data.get("science", []),
-        activities=data.get("activities", []),
-        results=data.get("results", []),
-        commercial=data.get("commercial", []),
-        partners=data.get("partners", []),
-    )
 
 # ---------------------------------------------------------------------------
 # official web site
@@ -395,27 +374,27 @@ def find_official_site(org: str) -> str:
 
 def extract_official_info(org: str, out_dir: Path) -> OrgInfo:
     """
-    1) находит официальный сайт,
-    2) скачивает главный + внутренние ссылки (1-й уровень),
-    3) сохраняет raw-текст в site_info.txt,
-    4) парсит LLM-ом в OrgInfo.
+    1) Находит официальный сайт.
+    2) Краулит главную + ссылки 1-го уровня (crawl_one_level).
+    3) Сохраняет сырой текст в site_info.txt.
+    4) Прогоняет LLM-экстракцию и возвращает OrgInfo.
     """
     url = find_official_site(org)
     if not url:
         console.print("[yellow]⚠ Официальный сайт не найден")
-        return OrgInfo([], [], [], [])
+        return OrgInfo()                       # пустой dataclass
 
     console.print(f"[bold]🌐 Краулю сайт (1 уровень): {url}")
     text = crawl_one_level(url)
+
     if not text:
         console.print("[yellow]⚠ Нет пригодного текста")
-        return OrgInfo([], [], [], [])
+        return OrgInfo()
 
     (out_dir / "site_info.txt").write_text(text, encoding="utf-8")
     console.print(f"[green]📝 site_info.txt записан ({len(text)} симв.)")
 
-    return _extract_info(text)
-
+    return _extract_info(text)                 # использует chunk-режим
 # ---------------------------------------------------------------------------
 # internet search
 # ---------------------------------------------------------------------------
@@ -529,15 +508,21 @@ def _diagnostic_download(url: str) -> str:
         console.print(f"[red]Readability failed:[/] {err}")
         return ""
 
-def crawl_one_level(start_url: str, max_pages: int = 7, min_len: int = 400) -> str:
+def crawl_one_level(
+    start_url: str,
+    max_pages: int = 10,
+    min_len: int = 200,
+    page_max_chars: int = 15_000,   # ← НОВОЕ: максимум символов с одной страницы
+) -> str:
     """
-    Скачивает главную страницу + все ссылки 1-го уровня внутри того же домена.
-    Возвращает объединённый «чистый» текст (или '' если ничего нет).
+    Скачивает главную + все ссылки 1-го уровня и возвращает объединённый текст.
+    • Если очищенный текст < min_len — пропускаем страницу.
+    • Если очищенный текст > page_max_chars — обрезаем его до page_max_chars.
     """
     domain = urlparse(start_url).netloc
     visited: set[str] = set()
-    queue   : list[str] = [start_url]
-    texts   : list[str] = []
+    queue:   list[str] = [start_url]
+    texts:   list[str] = []
 
     while queue and len(visited) < max_pages:
         url = queue.pop(0)
@@ -554,6 +539,9 @@ def crawl_one_level(start_url: str, max_pages: int = 7, min_len: int = 400) -> s
         html = r.text
         txt = trafilatura.extract(html, target_language="ru", no_fallback=False) or ""
         if len(txt) >= min_len:
+            # ── ограничиваем размер одной страницы ──────────────────
+            if len(txt) > page_max_chars:
+                txt = txt[:page_max_chars]
             texts.append(txt)
 
         # собираем ссылки глубины 1
@@ -563,6 +551,52 @@ def crawl_one_level(start_url: str, max_pages: int = 7, min_len: int = 400) -> s
             if urlparse(link).netloc == domain and link not in visited:
                 queue.append(link)
 
-        time.sleep(0.5 + random.uniform(0, 0.5))   # бережём сервер
+        time.sleep(0.5 + random.uniform(0, 0.5))
 
     return "\n".join(texts)
+
+def _extract_info(text: str,
+                  model: str = "gpt-4o-mini",
+                  chunk: int = 30_000) -> OrgInfo:
+    """
+    • Если текст ≤ chunk — единичный вызов function-calling.
+    • Если больше — режем на куски и агрегируем ответы.
+    """
+    def call_llm(piece: str) -> dict:
+        user_msg = PROMPT_INFO.format(text=piece)
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system",
+                 "content": "Ты эксперт по научной аналитике. "
+                            "Проанализируй текст и вызови функцию extract_org_info."},
+                {"role": "user", "content": user_msg}
+            ],
+            functions=[ORG_INFO_SCHEMA],
+            function_call={"name": "extract_org_info"},
+        )
+        return json.loads(resp.choices[0].message.function_call.arguments)
+
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    # ── короткие тексты ─────────────────────────────────────────────
+    if len(text) <= chunk:
+        data = call_llm(text)
+        return OrgInfo(**{k: data.get(k, []) for k in OrgInfo.__dataclass_fields__})
+
+    # ── длинные тексты  → chunk-map-reduce ─────────────────────────
+    console.print(f"[cyan]🔧 Text = {len(text):,} chars → chunking")
+    parts = textwrap.wrap(text, chunk)
+    agg = {k: [] for k in OrgInfo.__dataclass_fields__}
+
+    for i, part in enumerate(parts, 1):
+        console.print(f"⮑  Chunk {i}/{len(parts)} ({len(part)} chars)")
+        data = call_llm(part)
+        for k in agg:
+            agg[k].extend(data.get(k, []))
+
+    # дедупликация и усечённые списки (≤15 пунктов):
+    for k in agg:
+        agg[k] = list(dict.fromkeys(x.strip() for x in agg[k] if x.strip()))[:15]
+
+    return OrgInfo(**agg)

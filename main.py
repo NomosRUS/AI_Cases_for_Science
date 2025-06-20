@@ -1,13 +1,15 @@
 """CLI вход в AI-Scout-Lite."""
 
 from __future__ import annotations
+
 from ai_scout_lite.discover import discover_org
 import argparse
 import os
 from pathlib import Path
+import time                 # ← добавьте
+import random
 
 from ai_scout_lite import discover, cases, partners, pilots, validator
-
 
 
 
@@ -15,12 +17,26 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="AI-Scout-Lite")
     #parser.add_argument("org_name", help="Название организации")
-    parser.add_argument("org_name", help="Название организации", nargs="?", default="Сколтех")
+    parser.add_argument("org_name", help="Название организации", nargs="?", default="ИНСТИТУТ МЕТАЛЛООРГАНИЧЕСКОЙ "
+                                                                                    "ХИМИИ ИМ. Г.А. РАЗУВАЕВА")
     args = parser.parse_args()
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)
 
-    discover_org(args.org_name, output_dir)
+    ORG_NAMES = [
+        "Институт металлоорганической химии им. Г.А. Разуваева",
+        "Институт катализа им. Г.К. Борескова",
+        "ФЕДЕРАЛЬНОЕ ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ УЧРЕЖДЕНИЕ НАУКИ ПЕРМСКИЙ ФЕДЕРАЛЬНЫЙ ИССЛЕДОВАТЕЛЬСКИЙ ЦЕНТР "
+        "УРАЛЬСКОГО ОТДЕЛЕНИЯ РОССИЙСКОЙ АКАДЕМИИ НАУК"
+        # добавьте сколько нужно
+    ]
+
+    OUTPUT_ROOT = Path("output")
+    OUTPUT_ROOT.mkdir(exist_ok=True)
+
+    for org in ORG_NAMES:
+        discover_org(org, OUTPUT_ROOT / org.replace(" ", "_"))
+        time.sleep(3 + random.uniform(0, 2))
 
     # console.print("[bold]Ищем AI-кейсы...")
     # cases_df = cases.gather_ai_cases(args.org_name, insights.tasks)

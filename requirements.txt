@@ -1,13 +1,26 @@
+
+
+# ─── core ───
 openai>=1.3
-langchain
-python-dotenv
-duckduckgo_search
+langchain-openai>=0.1
+langchain-core>=0.1
+
+# ─── scraping / parsing ───
+requests
+requests-cache
 trafilatura
-newspaper3k
-sentence-transformers
-faiss-cpu
-pandas
-tqdm
+duckduckgo-search>=5.2
+readability-lxml
+beautifulsoup4
+lxml
+tldextract
+fake-useragent
+
+# ─── selenium stack ───
+selenium>=4.20
+webdriver-manager
+
+# ─── utils / output ───
 rich
-requests_cache
-langchain-openai
+transliterate
+

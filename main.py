@@ -4,39 +4,53 @@ from __future__ import annotations
 
 from ai_scout_lite.discover import discover_org
 import argparse
-import os
 from pathlib import Path
 import time                 # ← добавьте
 import random
 
 from ai_scout_lite import discover, cases, partners, pilots, validator
 
-
-
-def main() -> None:
-
-    parser = argparse.ArgumentParser(description="AI-Scout-Lite")
-    #parser.add_argument("org_name", help="Название организации")
-    parser.add_argument("org_name", help="Название организации", nargs="?", default="ИНСТИТУТ МЕТАЛЛООРГАНИЧЕСКОЙ "
-                                                                                    "ХИМИИ ИМ. Г.А. РАЗУВАЕВА")
-    args = parser.parse_args()
-    output_dir = Path("output")
-    output_dir.mkdir(exist_ok=True)
-
-    ORG_NAMES = [
+ORG_NAMES = [
         "Институт металлоорганической химии им. Г.А. Разуваева",
-        "Институт катализа им. Г.К. Борескова",
-        "ФЕДЕРАЛЬНОЕ ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ УЧРЕЖДЕНИЕ НАУКИ ПЕРМСКИЙ ФЕДЕРАЛЬНЫЙ ИССЛЕДОВАТЕЛЬСКИЙ ЦЕНТР "
-        "УРАЛЬСКОГО ОТДЕЛЕНИЯ РОССИЙСКОЙ АКАДЕМИИ НАУК"
+        #"Институт катализа им. Г.К. Борескова",
+        #"ФЕДЕРАЛЬНОЕ ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ УЧРЕЖДЕНИЕ НАУКИ ПЕРМСКИЙ ФЕДЕРАЛЬНЫЙ ИССЛЕДОВАТЕЛЬСКИЙ ЦЕНТР "
+        #"УРАЛЬСКОГО ОТДЕЛЕНИЯ РОССИЙСКОЙ АКАДЕМИИ НАУК"
         # добавьте сколько нужно
     ]
 
-    OUTPUT_ROOT = Path("output")
-    OUTPUT_ROOT.mkdir(exist_ok=True)
+def main() -> None:
+    """
+    Запускает discover-пайплайн для всех организаций из ORG_NAMES.
+    Опционально можно передать --org-file <txt>, чтобы читать список из файла (там же где main.py -
+    "C:/Users/Me/Docs/orgs.txt").
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--org-file",
+        help="Путь к .txt/.csv со списком организаций (по одной строке)",
+    )
+    parser.add_argument(
+        "--out",
+        default="output",
+        help="Каталог, куда складываются результаты",
+    )
+    args = parser.parse_args()
 
-    for org in ORG_NAMES:
-        discover_org(org, OUTPUT_ROOT / org.replace(" ", "_"))
+    # ── откуда берём список организаций ───────────────────────────────
+    org_list = ORG_NAMES
+    if args.org_file:                               # если указан файл
+        with open(args.org_file, encoding="utf-8") as fh:
+            org_list = [line.strip() for line in fh if line.strip()]
+
+    output_root = Path(args.out)
+    output_root.mkdir(exist_ok=True)
+
+    # ── основной цикл ─────────────────────────────────────────────────
+    for org in org_list:
+        discover_org(org, output_root / org.replace(" ", "_"))
+        # «честная» пауза, чтобы не ловить ratelimit DDG
         time.sleep(3 + random.uniform(0, 2))
+
 
     # console.print("[bold]Ищем AI-кейсы...")
     # cases_df = cases.gather_ai_cases(args.org_name, insights.tasks)

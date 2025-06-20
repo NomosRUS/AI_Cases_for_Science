@@ -19,6 +19,9 @@ from rich import box, table
 from readability import Document
 from bs4 import BeautifulSoup as BS
 
+from urllib.parse import urljoin, urlparse
+import requests, trafilatura, time, random
+
 from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.common.by import By
@@ -78,6 +81,7 @@ HEADERS = {
     "Accept-Language": "ru,en;q=0.9",
     "DNT": "1",
 }
+
 OUTPUT_ROOT = Path("output")
 GOOD_TLDS = {"ru", "su", "org", "edu", "ac", "science", "tech"}
 _MAX_RETRIES = 3          # сколько раз пробуем прежде чем сдаться
@@ -167,11 +171,11 @@ def ddg_first_links_firefox(query: str, n: int = 3) -> list[str]:
         driver.get(url)
 
         try:
-            WebDriverWait(driver, 7).until(
+            WebDriverWait(driver, 12).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "a.result__a"))
             )
         except TimeoutException:
-            console.print("[yellow]⚠ DDG: результаты не появились за 7 с[/]")
+            console.print("[yellow]⚠ DDG: результаты не появились за 12 с[/]")
             return []
 
         links = driver.find_elements(By.CSS_SELECTOR, "a.result__a")[: n]
@@ -232,7 +236,7 @@ def _extract_info(text: str, model: str = "gpt-4o-mini") -> OrgInfo:
 
     # 3. Запускаем цепочку (Prompt → ChatOpenAI)
     chain = prompt | llm
-    result = chain.invoke({"text": text[:4000]})  # ≤4 000 символов для экономии
+    result = chain.invoke({"text": text[:10000]})  # ≤4 000 символов для экономии
 
     # 4. JSON-парсинг + формирование dataclass
     data = extract_json(result)
@@ -248,32 +252,80 @@ def _extract_info(text: str, model: str = "gpt-4o-mini") -> OrgInfo:
 # ---------------------------------------------------------------------------
 
 def _clean_name(name: str) -> str:
+    _BAD_PREFIXES = (
+        "ФЕДЕРАЛЬНОЕ ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ УЧРЕЖДЕНИЕ НАУКИ",
+        "ФЕДЕРАЛЬНОЕ ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ НАУЧНОЕ УЧРЕЖДЕНИЕ",
+        "ФГБУ",
+        "ФИЦ",
+        "ФЕДЕРАЛЬНЫЙ ИССЛЕДОВАТЕЛЬСКИЙ ЦЕНТР",
+        "ФГУП",
+        "АО",
+    )
     """Убираем юр.формы / кавычки, оставляя «суть»."""
-    return re.sub(
-        r"(ФГБУ|ФИЦ|НИИ|АО|ФГУП|им\..*|\".*?\"|[«»])",
-        "",
-        name,
-        flags=re.I
-    ).strip()
+    txt = name.strip(" «»\"")
+    for bad in _BAD_PREFIXES:
+        if txt.upper().startswith(bad):
+            txt = txt[len(bad):].lstrip(" ,")
+    # убираем «им. Ф. И. О.» только как отдельный кусок, не всё подряд
+    txt = re.sub(r"\bим\.\s+", "", txt, flags=re.I).strip()
+    # убираем крайние кавычки, если остались
+    return txt.strip(" «»\"")
 
+
+#def _looks_like_official(url: str, clean: str, abbr: str) -> bool:
+    # """Эвристика: домен не wiki/справочник + содержит аббревиатуру
+    # или любую латинизированную часть названия."""
+    # host = urllib.parse.urlparse(url).netloc.lower()
+    #
+    # if host.startswith("ru.wikipedia.org") or host.endswith(".wikipedia.org"):
+    #     return False
+    #
+    # # латинизируем первое содержательное слово (Institute → institute, Институт → institut)
+    # first_word = translit(clean.split()[0], 'ru', reversed=True).lower()
+    #
+    # return (
+    #     first_word in host
+    #     or abbr.lower() in host              # РАН → ran, ИНХ → inh и т.п.
+    #     or "ras." in host                    # большинство сайтов РАН
+    # )
+SCIENCE_ZONES = (
+    "ras.ru", "ran.ru", "nsc.ru",        # Сибирское
+    "sbras.ru", "febras.ru", "ural.ru",  # отделения РАН
+    "iacp.dvo.ru", "ru/science",         # пример
+)
 
 def _looks_like_official(url: str, clean: str, abbr: str) -> bool:
-    """Эвристика: домен не wiki/справочник + содержит аббревиатуру
-    или любую латинизированную часть названия."""
     host = urllib.parse.urlparse(url).netloc.lower()
 
-    if host.startswith("ru.wikipedia.org") or host.endswith(".wikipedia.org"):
+    # 0. Сразу отсеиваем Википедию / словари
+    if ".wikipedia.org" in host or host.endswith(".academic.ru"):
         return False
 
-    # латинизируем первое содержательное слово (Institute → institute, Институт → institut)
-    first_word = translit(clean.split()[0], 'ru', reversed=True).lower()
+    # 1. Транслит первого значимого слова
+    first_word = translit(clean.split()[0], "ru", reversed=True).lower()
+
+    # 2. Подстроки из длинных слов (≥6)
+    stem_hits = False
+    for word in clean.split():
+        if len(word) >= 6:
+            stem = translit(word[:5], "ru", reversed=True).lower()
+            if stem in host:
+                stem_hits = True
+                break
+
+    # 3. Сдвигающееся окно 3-символов аббревиатуры
+    abbr_hits = any(abbr.lower()[i : i + 3] in host for i in range(len(abbr) - 2))
+
+    # 4. Научная «зона»
+    zone_hit = host.endswith(SCIENCE_ZONES)
 
     return (
         first_word in host
-        or abbr.lower() in host              # РАН → ran, ИНХ → inh и т.п.
-        or "ras." in host                    # большинство сайтов РАН
+        or abbr.lower() in host         # полное совпадение аббревиатуры
+        or abbr_hits                    # ≥3 подряд букв из аббревиатуры
+        or stem_hits                    # кусок длинного слова
+        or zone_hit                     # поддомен научного кластера
     )
-
 
 def find_official_site(org: str) -> str:
     """Возвращает URL официального сайта либо ''."""
@@ -283,7 +335,7 @@ def find_official_site(org: str) -> str:
 
     queries = [
         f"{clean} официальный сайт",
-        f"{clean} сайт",
+        f"{clean} сайт организации",
         f"{translit(clean, 'ru', reversed=True)} official website",
         f"{abbr} сайт" if len(abbr) > 3 else "",
     ]
@@ -311,29 +363,52 @@ def find_official_site(org: str) -> str:
 
 
 
-def extract_official_info(org: str) -> OrgInfo:
+#def extract_official_info(org: str) -> OrgInfo:
+    # """
+    # 1) ищет официальный сайт;
+    # 2) скачивает и чистит текст (через _diagnostic_download);
+    # 3) пишет raw-текст в output/<org>/site_info.txt, если он не пустой;
+    # 4) отдаёт структурированную OrgInfo (или «пустую», если сайта нет).
+    # """
+    # url = find_official_site(org)
+    # if not url:
+    #     logging.warning("Official site for %s not found", org)
+    #     return OrgInfo([], [], [], [])
+    #
+    # console.print(f"[bold]Читаем официальный сайт: {url}")
+    # text = _diagnostic_download(url)            # ← новый helper
+    #
+    # # ── сохраняем только, если хоть что-то извлекли ─────────────────
+    # if text and len(text) >= 500:
+    #     org_dir = OUTPUT_ROOT / org.replace(" ", "_")
+    #     org_dir.mkdir(parents=True, exist_ok=True)
+    #     (org_dir / "site_info.txt").write_text(text, encoding="utf-8")
+    #     console.print(f"[green]📝 site_info.txt записан ({len(text)} симв.)")
+    # else:
+    #     console.print("[yellow]⚠ текст пуст — файл не создан")
+    #
+    # return _extract_info(text)
+
+def extract_official_info(org: str, out_dir: Path) -> OrgInfo:
     """
-    1) ищет официальный сайт;
-    2) скачивает и чистит текст (через _diagnostic_download);
-    3) пишет raw-текст в output/<org>/site_info.txt, если он не пустой;
-    4) отдаёт структурированную OrgInfo (или «пустую», если сайта нет).
+    1) находит официальный сайт,
+    2) скачивает главный + внутренние ссылки (1-й уровень),
+    3) сохраняет raw-текст в site_info.txt,
+    4) парсит LLM-ом в OrgInfo.
     """
     url = find_official_site(org)
     if not url:
-        logging.warning("Official site for %s not found", org)
+        console.print("[yellow]⚠ Официальный сайт не найден")
         return OrgInfo([], [], [], [])
 
-    console.print(f"[bold]Читаем официальный сайт: {url}")
-    text = _diagnostic_download(url)            # ← новый helper
+    console.print(f"[bold]🌐 Краулю сайт (1 уровень): {url}")
+    text = crawl_one_level(url)
+    if not text:
+        console.print("[yellow]⚠ Нет пригодного текста")
+        return OrgInfo([], [], [], [])
 
-    # ── сохраняем только, если хоть что-то извлекли ─────────────────
-    if text and len(text) >= 500:
-        org_dir = OUTPUT_ROOT / org.replace(" ", "_")
-        org_dir.mkdir(parents=True, exist_ok=True)
-        (org_dir / "site_info.txt").write_text(text, encoding="utf-8")
-        console.print(f"[green]📝 site_info.txt записан ({len(text)} симв.)")
-    else:
-        console.print("[yellow]⚠ текст пуст — файл не создан")
+    (out_dir / "site_info.txt").write_text(text, encoding="utf-8")
+    console.print(f"[green]📝 site_info.txt записан ({len(text)} симв.)")
 
     return _extract_info(text)
 
@@ -387,7 +462,7 @@ def discover_org(org: str, output_dir: Path) -> None:
     console.print("Запустили информационный скрининг организации")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    site_info = extract_official_info(org)
+    site_info = extract_official_info(org, output_dir)
     web_info = gather_internet_info(org)
 
     save_json(site_info, output_dir / "site_info.json")
@@ -442,3 +517,41 @@ def _diagnostic_download(url: str) -> str:
     except Exception as err:
         console.print(f"[red]Readability failed:[/] {err}")
         return ""
+
+def crawl_one_level(start_url: str, max_pages: int = 10, min_len: int = 400) -> str:
+    """
+    Скачивает главную страницу + все ссылки 1-го уровня внутри того же домена.
+    Возвращает объединённый «чистый» текст (или '' если ничего нет).
+    """
+    domain = urlparse(start_url).netloc
+    visited: set[str] = set()
+    queue   : list[str] = [start_url]
+    texts   : list[str] = []
+
+    while queue and len(visited) < max_pages:
+        url = queue.pop(0)
+        if url in visited:
+            continue
+        visited.add(url)
+
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            r.raise_for_status()
+        except requests.RequestException:
+            continue
+
+        html = r.text
+        txt = trafilatura.extract(html, target_language="ru", no_fallback=False) or ""
+        if len(txt) >= min_len:
+            texts.append(txt)
+
+        # собираем ссылки глубины 1
+        soup = BS(html, "lxml")
+        for a in soup.find_all("a", href=True):
+            link = urljoin(url, a["href"])
+            if urlparse(link).netloc == domain and link not in visited:
+                queue.append(link)
+
+        time.sleep(0.5 + random.uniform(0, 0.5))   # бережём сервер
+
+    return "\n".join(texts)

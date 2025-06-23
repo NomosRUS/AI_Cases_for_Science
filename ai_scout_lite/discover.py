@@ -132,7 +132,7 @@ ORG_INFO_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 
-def search_duckduckgo(query: str, max_results: int = 10) -> List[str]:
+def search_duckduckgo(query: str, max_results: int = 7) -> List[str]:
     """DuckDuckGo search with Firefox UA, back-off and verbose logging."""
     console.print(f"[cyan]→ DuckDuckGo query:[/] {query}")
 
@@ -164,11 +164,22 @@ def search_duckduckgo(query: str, max_results: int = 10) -> List[str]:
     console.print("[red]❌ DuckDuckGo: все попытки исчерпаны[/]")
     return []
 
-def ddg_first_links_firefox(query: str, n: int = 3) -> list[str]:
+SEARCH_SELECTORS = (
+    "a[data-testid='result-title-a']",  # новый layout DDG (июль-2025)
+    "a.result__a",                      # старый layout
+    "a.result-link",                    # html.duckduckgo.com
+)
+
+def _is_serp_link(href: str) -> bool:
+    """Отфильтровываем ссылки самого DuckDuckGo (страницы выдачи)."""
+    return "duckduckgo.com" in urlparse(href).netloc
+
+def ddg_first_links_firefox(query: str, n: int = 3, wait_sec: int = 12) -> list[str]:
     """
-    Возвращает первые n ссылок DuckDuckGo через headless-Firefox.
-    • Не кликает форму; сразу открывает URL вида `/?q=...&ia=web`.
-    • Ждёт до 7 с появления результатов и берёт ссылки по CSS `.result__a`.
+    Ищет query в DuckDuckGo через headless-Firefox и возвращает первые n реальных ссылок.
+    • Открывает сразу SERP по URL /?q=...
+    • Поддерживает старый и новый HTML-layout (2025).
+    • Очищает ссылки «duckduckgo.com/?q=...».
     """
     console.print(f"[cyan]→ Firefox DDG query:[/] {query}")
 
@@ -180,28 +191,37 @@ def ddg_first_links_firefox(query: str, n: int = 3) -> list[str]:
     )
 
     try:
-        url = (
-            "https://duckduckgo.com/?q="
-            + quote_plus(query)
-            + "&ia=web&kl=ru-ru"
-        )
-        driver.get(url)
+        driver.get(f"https://duckduckgo.com/?q={quote_plus(query)}&ia=web&kl=ru-ru")
 
-        try:
-            WebDriverWait(driver, 12).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "a.result__a"))
-            )
-        except TimeoutException:
-            console.print("[yellow]⚠ DDG: результаты не появились за 12 с[/]")
+        # ждём появления ЛЮБОГО из допустимых селекторов
+        found = False
+        for css in SEARCH_SELECTORS:
+            try:
+                WebDriverWait(driver, wait_sec).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, css))
+                )
+                found = True
+                break
+            except TimeoutException:
+                continue
+
+        if not found:
+            console.print(f"[yellow]⚠ DDG: нет результатов за {wait_sec} с[/]")
             return []
 
-        links = driver.find_elements(By.CSS_SELECTOR, "a.result__a")[: n]
-        hrefs = [link.get_attribute("href") for link in links]
+        links = []
+        for css in SEARCH_SELECTORS:
+            links.extend(driver.find_elements(By.CSS_SELECTOR, css))
+            if links:
+                break                              # берём первую удачную разметку
+
+        hrefs = [
+            l.get_attribute("href") for l in links[: n]
+            if l.get_attribute("href") and not _is_serp_link(l.get_attribute("href"))
+        ]
 
         if hrefs:
-            console.print(
-                "[green]✔ результаты:[/]\n  " + "\n  ".join(hrefs)
-            )
+            console.print("[green]✔ результаты:[/]\n  " + "\n  ".join(hrefs))
         else:
             console.print("[yellow]⚠ ничего не найдено[/]")
 
@@ -209,7 +229,6 @@ def ddg_first_links_firefox(query: str, n: int = 3) -> list[str]:
 
     finally:
         driver.quit()
-
 
 def fetch_text(url: str) -> str:
     """Download and clean page text."""
@@ -399,12 +418,14 @@ def extract_official_info(org: str, out_dir: Path) -> OrgInfo:
 # internet search
 # ---------------------------------------------------------------------------
 
-def gather_internet_info(org: str, max_results: int = 10) -> OrgInfo:
+def gather_internet_info(org: str, max_results: int = 7) -> OrgInfo:
     """Search the web for public information about the organisation."""
     console.print("Читаем иные открытые источники")
 
+    clean = _clean_name(org)
+    query = f"{clean} результаты партнеры научные исследования"
+
     texts: List[str] = []
-    query = f"{org} результаты партнеры исследования"
     for url in search_duckduckgo(query, max_results=max_results):
         txt = fetch_text(url)
         if txt:
@@ -510,7 +531,7 @@ def _diagnostic_download(url: str) -> str:
 
 def crawl_one_level(
     start_url: str,
-    max_pages: int = 10,
+    max_pages: int = 7,
     min_len: int = 200,
     page_max_chars: int = 15_000,   # ← НОВОЕ: максимум символов с одной страницы
 ) -> str:

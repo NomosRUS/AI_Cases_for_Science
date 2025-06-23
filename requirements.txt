@@ -24,3 +24,5 @@ webdriver-manager
 rich
 transliterate
 
+chardet>=5
+
